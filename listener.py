@@ -22,7 +22,7 @@ class F125Decoder:
         offset = 29 + (player_index * car_block_size)
         
         # Pulling Speed, Throttle, Brake, Gear, RPM
-        car_data = data[offset : offset + 15]
+        car_data = data[offset : offset + 18]
         speed, throttle, steer, brake, clutch, gear, rpm = struct.unpack('<HfffBbH', car_data)
         
         return {

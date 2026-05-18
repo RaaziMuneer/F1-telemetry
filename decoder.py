@@ -7,25 +7,30 @@ class F125Decoder:
 
     def unpack_header(self, data):
         """Unpacks the first 29 bytes to identify the packet."""
-        header_data = data[:struct.calcsize(self.HEADER_FORMAT)]
+        if len(data) < 29:
+            return None
+        header_data = data[:29]
         unpacked = struct.unpack(self.HEADER_FORMAT, header_data)
         
         return {
             "packetId": unpacked[5],        # Tells us if it's Telemetry, Lap Data, etc.
             "playerCarIndex": unpacked[10], # Your car's position in the data arrays
-            "sessionTime": unpacked[7]      # Current timestamp of the session
+            "sessionUID": unpacked[6],      # Needed for Phase 4 database logging
+            "frameId": unpacked[8]          # Needed for Phase 4 database logging
         }
 
     def decode_telemetry(self, data, player_index):
         """Decodes Packet ID 6 (Car Telemetry) for the player car only."""
-        # The telemetry packet contains an array of 22 cars. 
-        # We jump the header (29) + (car_index * size_of_one_car_block)
-        # Size of one car block in F1 25 is 60 bytes.
         car_block_size = 60
         offset = 29 + (player_index * car_block_size)
         
-        # We'll extract: Speed (H), Throttle (f), Steer (f), Brake (f), Clutch (B), Gear (b), RPM (H)
-        car_data = data[offset : offset + 15]
+        # FIX: We extract 18 bytes to perfectly match the 18-byte structure template
+        car_data = data[offset : offset + 18]
+        
+        # Safety Check: If data slice is incomplete, reject it cleanly
+        if len(car_data) < 18:
+            return None
+            
         speed, throttle, steer, brake, clutch, gear, rpm = struct.unpack('<HfffBbH', car_data)
         
         return {

@@ -5,13 +5,10 @@ import socket
 import struct
 import time
 import sqlite3
-from decoder import F125Decoder 
-from logger import TelemetryLogger
 
 # --- 1. AI COACH FUNCTION ---
 def get_ai_coaching(lap_df):
     try:
-        # Use your actual API Key here
         genai.configure(api_key="YOUR_GEMINI_API_KEY")
         model = genai.GenerativeModel('gemini-1.5-flash')
         
@@ -30,16 +27,48 @@ def get_ai_coaching(lap_df):
     except Exception as e:
         return f"AI Engineer is busy: {e}"
 
-# --- 2. STREAMLIT UI SETUP ---
+# --- 2. EMBEDDED DECODER CLASS (Fixes the import issues) ---
+class F125Decoder:
+    HEADER_FORMAT = '<HBBBBBQfIIBB'
+
+    def unpack_header(self, data):
+        if len(data) < 29:
+            return None
+        header_data = data[:29]
+        unpacked = struct.unpack(self.HEADER_FORMAT, header_data)
+        return {
+            "packetId": unpacked[5],
+            "playerCarIndex": unpacked[10]
+        }
+
+    def decode_telemetry(self, data, player_index):
+        car_block_size = 60
+        offset = 29 + (player_index * car_block_size)
+        
+        # FIX: Slicing 18 bytes instead of 15 to match the unpack string format
+        car_data = data[offset : offset + 18]
+        if len(car_data) < 18:
+            return None
+            
+        speed, throttle, steer, brake, clutch, gear, rpm = struct.unpack('<HfffBbH', car_data)
+        
+        return {
+            "speed": speed,
+            "throttle": round(throttle * 100),
+            "brake": round(brake * 100),
+            "gear": gear,
+            "rpm": rpm
+        }
+
+# --- 3. STREAMLIT UI SETUP ---
 st.set_page_config(page_title="F1 25 Live Telemetry", layout="wide")
 st.title("🏎️ F1 25 Real-Time Analysis")
 
-# Sidebar Buttons (Placed OUTSIDE the loop for stability)
+# Sidebar Controls
 st.sidebar.header("🕹️ Controls")
 if st.sidebar.button("Get AI Coaching"):
     try:
         conn = sqlite3.connect("f1_telemetry.db")
-        # Pulling a snapshot of recent data
         last_lap = pd.read_sql_query("SELECT * FROM telemetry ORDER BY rowid DESC LIMIT 2000", conn)
         conn.close()
         
@@ -60,7 +89,7 @@ if st.sidebar.button("Export Database to CSV"):
     except Exception as e:
         st.sidebar.error(f"Export failed: {e}")
 
-# Ghost Comparison Upload
+# Ghost Comparison Setup
 st.sidebar.header("👻 Ghost Comparison")
 uploaded_file = st.sidebar.file_uploader("Upload Rival CSV", type="csv")
 ghost_data = None
@@ -75,8 +104,8 @@ gear_gauge = col2.empty()
 rpm_gauge = col3.empty()
 chart_placeholder = st.empty()
 
-# --- 3. UDP INITIALIZATION ---
-UDP_IP = "127.0.0.1"
+# --- 4. UDP INITIALIZATION ---
+UDP_IP = "127.0.0.1"  # Changed to localhost to match your game output preference
 UDP_PORT = 20777
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -88,12 +117,15 @@ except OSError:
     st.error(f"Port {UDP_PORT} is busy. Close other scripts and refresh.")
     st.stop()
 
-decoder = F125Decoder()
+# Import Logger dynamically (ensures your logger.py is working independently)
+from logger import TelemetryLogger
 db_logger = TelemetryLogger()
+
+decoder = F125Decoder()
 frame_count = 0
 history = pd.DataFrame(columns=["Live_Speed", "Live_Throttle"])
 
-# --- 4. MAIN TELEMETRY LOOP ---
+# --- 5. CLEAN AND STABLE MAIN TELEMETRY LOOP ---
 while True:
     try:
         data, addr = sock.recvfrom(2048)
@@ -103,25 +135,23 @@ while True:
             try:
                 stats = decoder.decode_telemetry(data, header['playerCarIndex'])
                 if stats:
-                    # Logging
+                    # Database Logging
                     db_logger.log_data(header['sessionUID'], header['frameId'], stats)
                     frame_count += 1
                     if frame_count % 100 == 0:
                         db_logger.save()
 
-                    # UI Updates
+                    # Real-Time UI Updates
                     speed_gauge.metric("Speed (km/h)", stats['speed'])
                     gear_gauge.metric("Gear", stats['gear'])
                     rpm_gauge.metric("RPM", stats['rpm'])
 
-                    # Data for Charting
+                    # Data Manipulation for Rolling Chart
                     new_row = pd.DataFrame([{"Live_Speed": stats['speed'], "Live_Throttle": stats['throttle']}])
                     history = pd.concat([history, new_row], ignore_index=True).tail(100)
-
-                    # Prepare Plotting DataFrame
                     plot_df = history.copy().reset_index(drop=True)
 
-                    # Ghost Logic Sync
+                    # Dynamic Ghost Comparison Syncing
                     if ghost_data is not None:
                         current_ghost_idx = frame_count % len(ghost_data)
                         ghost_slice = ghost_data.iloc[current_ghost_idx : current_ghost_idx + len(plot_df)]
@@ -131,10 +161,10 @@ while True:
                     chart_placeholder.line_chart(plot_df)
 
             except struct.error:
-                pass # Skip malformed packets
+                pass  # Safely handle occasional network drops or short packets
 
     except BlockingIOError:
-        time.sleep(0.01) # Wait for next UDP packet
+        time.sleep(0.01)  # Keeps CPU load down while waiting for packets
     except Exception as e:
-        st.write(f"Loop Error: {e}")
+        st.write(f"Loop Interrupted: {e}")
         break
