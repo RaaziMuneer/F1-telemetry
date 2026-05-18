@@ -9,7 +9,7 @@ import sqlite3
 # --- 1. AI COACH FUNCTION ---
 def get_ai_coaching(lap_df):
     try:
-        genai.configure(api_key="YOUR_GEMINI_API_KEY")
+        genai.configure(api_key="AIzaSyAK5y-KqlJq7RSwoT5gY3rJyGIwK27izyg")
         model = genai.GenerativeModel('gemini-1.5-flash')
         
         max_speed = lap_df['speed'].max()
