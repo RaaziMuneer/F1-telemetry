@@ -1,7 +1,8 @@
+# core/coach.py
 import os
 import google.generativeai as genai
 
-class AI raceEngineer:
+class AIRaceEngineer:
     def __init__(self):
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
@@ -22,7 +23,7 @@ class AI raceEngineer:
         - Heavy Braking Events (>90%): {heavy_brakes}
         - Avg ERS Store Level: {avg_ers:.1f} J
 
-        Provide 3 short, high-impact racing adjustments focusing on corner entry, ERS deployment, and traction out of slow corners.
+        Provide 3 concise, high-impact driving tips focusing on braking points, ERS usage, and traction exit.
         """
         response = self.model.generate_content(prompt)
         return response.text
